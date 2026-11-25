@@ -2,8 +2,10 @@
 """
 证件照单张出图（Z-Image 热服务客户端）
 =====================================
-默认参数与 out1/test_4_idphoto_cfg2.png 完全一致：
+默认参数与 out1/idcard_2428_20_15_real4.png（真人感优化版）完全一致：
     seed=2428, 1024x1408, cfg_scale=2, steps=15
+真人感要点：暖黄肤色+毛孔/油光/泛红/痘印等具体皮肤细节+RAW直出颗粒感；
+负向词压磨皮美颜，cfg 必须 >=2 负向词才生效。
 
 模型由 server.py 常驻显存，本脚本只发请求、存图，不加载模型。
 
@@ -33,18 +35,21 @@ from PIL import Image
 
 DEFAULT_SERVER = "http://127.0.0.1:8129"
 
-PROMPT = """证件照，正面免冠半身人像，标准二寸证件照，人物端坐，身体正对镜头。
-头颈正直，头部没有任何倾斜和歪斜，鼻尖朝向正前方，两只耳朵在同一高度，双肩完全水平，左右对称，面部完整正对镜头。
-年轻亚洲女性，表情平静自然，嘴唇自然闭合，双眼平视镜头，眼睛看向正前方镜头，不向左也不向右。
-黑色头发整齐梳起，头发别在耳后，两侧耳朵清晰可见，没有散落的碎发，不佩戴饰品。
-身穿白色衬衫和深色西装外套，衣领平整对称。
-均匀柔和的证件照布光，正面打光，面部受光均匀，没有明显阴影。
-真实皮肤质感，可见细腻毛孔与自然肤色，单反相机拍摄，照片级真实，非AI塑料感。
-纯浅灰色背景，纯色、平整、无渐变。头顶留白，锁骨以下自然裁切。
+PROMPT = """证件照，正面免冠半身像，街边快照照相馆用机顶闪光灯直拍的证件照片，raw photo, unretouched, film grain。
+人物端坐正对镜头，头颈正直不歪斜，双肩完全水平，双耳等高清晰可见，面部正对镜头，双眼平视镜头，表情平静自然放松，嘴唇自然闭合。
+年轻亚洲女性，普通人的长相，自然的暖黄皮肤，不是冷白皮，脸颊鼻头有红润血色，肤色不均匀，额头略深。
+皮肤真实粗糙：毛孔清晰可见，鼻头和鼻翼毛孔明显，T区出油有油光反光，脸颊有几颗淡淡的痘印和闭口，几颗小雀斑和一颗小痣，眼下有细纹和轻微黑眼圈，面部细小绒毛在光下可见，嘴唇有唇纹和轻微起皮。
+skin pores, subtle blemishes, natural skin texture, slight oily shine, fine facial hair。
+眉毛左右不对称，脸型轻微不对称，发际线有细碎绒毛。
+黑色头发束起别在耳后，露出双耳，有少量碎发。
+白色衬衫外穿深色西装外套，衣领平整，布料有真实织纹和轻微褶皱。
+浅灰色背景。闪光灯直打，光线略硬，面部有真实的高光和轻微阴影，鼻下有淡影。
+佳能单反85mm镜头，ISO 400，直出未修图，明显但自然的颗粒噪点。
+构图到胸部以上，头顶留白。
 hbch
 """
 
-NEGATIVE_PROMPT = """歪头，头部倾斜，侧脸，四分之三侧脸，身体侧转，耸肩，高低肩，肩膀不对称，仰头，低头，扭曲的脖子，AI脸，塑料感，蜡像感，过度磨皮，过饱和，3d render，CGI，模糊，畸形，画质差。"""
+NEGATIVE_PROMPT = """磨皮，美颜，美妆滤镜，瓷娃娃皮肤，无瑕皮肤，皮肤过白，肤色惨白，过度美白，光滑无毛孔，塑料感，蜡像感，AI脸，3d render，CGI，过度锐化，过饱和，歪头，头部倾斜，侧脸，四分之三侧脸，高低肩，肩膀不对称，身体侧转，仰头，低头，模糊，畸形，画质差。"""
 
 
 def generate(server, prompt, negative_prompt, seed, width, height, cfg, steps, timeout):
@@ -82,7 +87,17 @@ def main():
     ap.add_argument("--cfg", type=float, default=2)
     ap.add_argument("--steps", type=int, default=15)
     ap.add_argument("--timeout", type=int, default=1800)
+    ap.add_argument("--prompt-file", default=None, help="用文件内容覆盖正向提示词")
+    ap.add_argument("--neg-file", default=None, help="用文件内容覆盖负向提示词")
+    ap.add_argument("--tag", default=None, help="输出文件名后缀标记")
     args = ap.parse_args()
+
+    prompt = PROMPT
+    negative_prompt = NEGATIVE_PROMPT
+    if args.prompt_file:
+        prompt = open(args.prompt_file, encoding="utf-8").read().strip() + "\n"
+    if args.neg_file:
+        negative_prompt = open(args.neg_file, encoding="utf-8").read().strip()
 
     os.makedirs(args.out, exist_ok=True)
 
@@ -99,19 +114,20 @@ def main():
         raise SystemExit(1)
 
     t0 = time.time()
-    image, resp = generate(args.server, PROMPT, NEGATIVE_PROMPT, args.seed,
+    image, resp = generate(args.server, prompt, negative_prompt, args.seed,
                            args.width, args.height, args.cfg, args.steps, args.timeout)
     secs = time.time() - t0
 
-    png_path = os.path.join(args.out, "idcard_%s_%s_%s.png"
-                            % (args.seed, str(int(args.cfg * 10)), args.steps))
-    txt_path = os.path.join(args.out, "idcard_%s_jiance.txt" % args.seed)
+    tag = "_" + args.tag if args.tag else ""
+    png_path = os.path.join(args.out, "idcard_%s_%s_%s%s.png"
+                            % (args.seed, str(int(args.cfg * 10)), args.steps, tag))
+    txt_path = os.path.join(args.out, "idcard_%s%s_jiance.txt" % (args.seed, tag))
     image.save(png_path)
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write("Positive Prompt:\n")
-        f.write(PROMPT)
+        f.write(prompt)
         f.write("\n\nNegative Prompt:\n")
-        f.write(NEGATIVE_PROMPT)
+        f.write(negative_prompt)
         f.write("\n\nseed=%s  %dx%d  cfg=%s  steps=%s\n"
                 % (args.seed, args.width, args.height, args.cfg, args.steps))
 
